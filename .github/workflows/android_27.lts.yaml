@@ -132,6 +132,20 @@ jobs:
           gclient sync --no-history
           echo "====> Dependencies re-synced against upstream ${COBALT_VERSION} DEPS"
 
+      - name: Restore TizenTube branding assets
+        run: |
+          set -euo pipefail
+          cd src
+          git fetch --no-tags --depth=1 "${{ github.server_url }}/${{ github.repository }}.git" "${{ github.sha }}"
+          git checkout FETCH_HEAD -- \
+            cobalt/shell/android/java/res/drawable-xhdpi/app_banner.png \
+            cobalt/shell/android/java/res/mipmap-hdpi/ic_app.png \
+            cobalt/shell/android/java/res/mipmap-mdpi/ic_app.png \
+            cobalt/shell/android/java/res/mipmap-xhdpi/ic_app.png \
+            cobalt/shell/android/java/res/mipmap-xxhdpi/ic_app.png \
+            cobalt/shell/android/java/res/mipmap-xxxhdpi/ic_app.png
+          echo "====> Restored TizenTube branding assets from ${{ github.sha }}"
+
       - name: Patch Cobalt Shell Resource List
         run: |
           cd src
