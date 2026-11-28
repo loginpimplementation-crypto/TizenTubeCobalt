@@ -1,0 +1,147 @@
+diff --git a/cobalt/shell/android/BUILD.gn b/cobalt/shell/android/BUILD.gn
+index aff7f701..ce2708e0 100644
+--- a/cobalt/shell/android/BUILD.gn
++++ b/cobalt/shell/android/BUILD.gn
+@@ -86,6 +86,7 @@ android_library("cobalt_shell_java") {
+     "java/src/dev/cobalt/shell/ShellViewAndroidDelegate.java",
+     "java/src/dev/cobalt/shell/StartupGuard.java",
+     "java/src/dev/cobalt/shell/StartupGuardNavigationObserver.java",
++    "java/src/dev/cobalt/shell/TvRecommendationPublisher.java",
+   ]
+ }
+ 
+diff --git a/cobalt/shell/android/java/src/dev/cobalt/shell/Shell.java b/cobalt/shell/android/java/src/dev/cobalt/shell/Shell.java
+index 872ac151..75894aa3 100644
+--- a/cobalt/shell/android/java/src/dev/cobalt/shell/Shell.java
++++ b/cobalt/shell/android/java/src/dev/cobalt/shell/Shell.java
+@@ -72,6 +72,11 @@ public class Shell {
+   public Shell(Context context) {
+     Activity activity = (Activity) context;
+     mRootView = activity.findViewById(android.R.id.content);
++
++    Context appContext = context.getApplicationContext();
++    if (appContext != null) {
++      TvRecommendationPublisher.publish(appContext);
++    }
+   }
+ 
+   public void setRootViewForTesting(ViewGroup view) {
+diff --git a/cobalt/shell/android/java/src/dev/cobalt/shell/TvRecommendationPublisher.java b/cobalt/shell/android/java/src/dev/cobalt/shell/TvRecommendationPublisher.java
+new file mode 100644
+index 00000000..81377eae
+--- /dev/null
++++ b/cobalt/shell/android/java/src/dev/cobalt/shell/TvRecommendationPublisher.java
+@@ -0,0 +1,100 @@
++// Copyright 2026 The Cobalt Authors. All Rights Reserved.
++//
++// Licensed under the Apache License, Version 2.0 (the "License");
++// you may not use this file except in compliance with the License.
++// You may obtain a copy of the License at
++//
++//     http://www.apache.org/licenses/LICENSE-2.0
++//
++// Unless required by applicable law or agreed to in writing, software
++// distributed under the License is distributed on an "AS IS" BASIS,
++// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++// See the License for the specific language governing permissions and
++// limitations under the License.
++
++package dev.cobalt.shell;
++
++import android.content.ContentResolver;
++import android.content.ContentUris;
++import android.content.ContentValues;
++import android.content.Context;
++import android.content.Intent;
++import android.database.Cursor;
++import android.media.tv.TvContract;
++import android.net.Uri;
++import android.util.Log;
++
++/** Publishes a small preview channel so Android TV launchers can show a TizenTube card. */
++public final class TvRecommendationPublisher {
++  private static final String TAG = "TvRecommendationPublisher";
++  private static final String CHANNEL_NAME = "TizenTube";
++
++  private TvRecommendationPublisher() {}
++
++  /** Called once the shell UI is attached; failures are logged and never break startup. */
++  public static void publish(Context context) {
++    try {
++      ContentResolver resolver = context.getContentResolver();
++      Uri channelUri = findOrCreateChannel(resolver, context);
++      if (channelUri == null) {
++        Log.w(TAG, "Channel insertion was denied (WRITE_EPG_DATA unavailable?).");
++        return;
++      }
++      long channelId = ContentUris.parseId(channelUri);
++
++      Intent intent =
++          new Intent(Intent.ACTION_VIEW, Uri.parse("https://www.youtube.com/tv"))
++              .setPackage(context.getPackageName())
++              .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
++
++      ContentValues program = new ContentValues();
++      program.put(TvContract.PreviewPrograms.COLUMN_CHANNEL_ID, channelId);
++      program.put(TvContract.PreviewPrograms.COLUMN_TITLE, CHANNEL_NAME);
++      program.put(
++          TvContract.PreviewPrograms.COLUMN_SHORT_DESCRIPTION, "Open TizenTube in Cobalt");
++      program.put(
++          TvContract.PreviewPrograms.COLUMN_INTENT_URI,
++          intent.toUri(Intent.URI_INTENT_SCHEME));
++      program.put(TvContract.PreviewPrograms.COLUMN_WEIGHT, 1.0f);
++
++      resolver.delete(
++          TvContract.PreviewPrograms.CONTENT_URI,
++          TvContract.PreviewPrograms.COLUMN_CHANNEL_ID + "=?",
++          new String[] {String.valueOf(channelId)});
++      resolver.insert(TvContract.PreviewPrograms.CONTENT_URI, program);
++    } catch (SecurityException | IllegalArgumentException e) {
++      Log.w(TAG, "Unable to publish TV recommendation: " + e.getMessage());
++    }
++  }
++
++  private static Uri findOrCreateChannel(ContentResolver resolver, Context context) {
++    String[] projection = {TvContract.Channels._ID};
++    String selection =
++        TvContract.Channels.COLUMN_PACKAGE_NAME
++            + "=? AND "
++            + TvContract.Channels.COLUMN_DISPLAY_NAME
++            + "=?";
++    Cursor cursor =
++        resolver.query(
++            TvContract.Channels.CONTENT_URI,
++            projection,
++            selection,
++            new String[] {context.getPackageName(), CHANNEL_NAME},
++            null);
++    if (cursor != null) {
++      try {
++        if (cursor.moveToFirst()) {
++          return TvContract.buildChannelUri(cursor.getLong(0));
++        }
++      } finally {
++        cursor.close();
++      }
++    }
++
++    ContentValues channel = new ContentValues();
++    channel.put(TvContract.Channels.COLUMN_DISPLAY_NAME, CHANNEL_NAME);
++    channel.put(TvContract.Channels.COLUMN_PACKAGE_NAME, context.getPackageName());
++    channel.put(TvContract.Channels.COLUMN_TYPE, TvContract.Channels.TYPE_PREVIEW);
++    return resolver.insert(TvContract.Channels.CONTENT_URI, channel);
++  }
++}
+diff --git a/cobalt/shell/android/shell_apk/AndroidManifest.xml.jinja2 b/cobalt/shell/android/shell_apk/AndroidManifest.xml.jinja2
+index a3191cc5..ae74851a 100644
+--- a/cobalt/shell/android/shell_apk/AndroidManifest.xml.jinja2
++++ b/cobalt/shell/android/shell_apk/AndroidManifest.xml.jinja2
+@@ -34,6 +34,8 @@
+     <uses-permission android:name="android.permission.VIBRATE"/>
+     <uses-permission android:name="android.permission.WAKE_LOCK"/>
+     <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE"/>
++    <uses-permission android:name="android.permission.WRITE_EPG_DATA"/>
++    <uses-permission android:name="android.permission.READ_EPG_DATA"/>
+     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE"/>
+     <uses-permission android:name="android.permission.GET_ACCOUNTS"/>
+     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES"/>
