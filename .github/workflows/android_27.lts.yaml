@@ -132,6 +132,20 @@ jobs:
           gclient sync --no-history
           echo "====> Dependencies re-synced against upstream ${COBALT_VERSION} DEPS"
 
+      - name: Restore TizenTube branding assets
+        run: |
+          set -euo pipefail
+          cd src
+          git fetch --no-tags --depth=1 "${{ github.server_url }}/${{ github.repository }}.git" "${{ github.sha }}"
+          git checkout FETCH_HEAD -- \
+            cobalt/shell/android/java/res/drawable-xhdpi/app_banner.png \
+            cobalt/shell/android/java/res/mipmap-hdpi/ic_app.png \
+            cobalt/shell/android/java/res/mipmap-mdpi/ic_app.png \
+            cobalt/shell/android/java/res/mipmap-xhdpi/ic_app.png \
+            cobalt/shell/android/java/res/mipmap-xxhdpi/ic_app.png \
+            cobalt/shell/android/java/res/mipmap-xxxhdpi/ic_app.png
+          echo "====> Restored TizenTube branding assets from ${{ github.sha }}"
+
       - name: Patch Cobalt Shell Resource List
         run: |
           cd src
@@ -140,7 +154,8 @@ jobs:
 
           path = Path("cobalt/shell/android/BUILD.gn")
           text = path.read_text(encoding="utf-8")
-          anchor = '    "java/res/values/styles.xml",\n'
+          anchor_branding = '    "java/res/values/colors.xml",\n'
+          anchor_locales = '    "java/res/values/styles.xml",\n'
           locales = [
               "java/res/values-de/strings.xml",
               "java/res/values-es/strings.xml",
@@ -150,19 +165,37 @@ jobs:
               "java/res/values-pl/strings.xml",
               "java/res/values-szl/strings.xml",
           ]
-          if text.count(anchor) != 1:
+          branding = [
+              "java/res/drawable-xhdpi/app_banner.png",
+              "java/res/mipmap-hdpi/ic_app.png",
+              "java/res/mipmap-mdpi/ic_app.png",
+              "java/res/mipmap-xhdpi/ic_app.png",
+              "java/res/mipmap-xxhdpi/ic_app.png",
+              "java/res/mipmap-xxxhdpi/ic_app.png",
+          ]
+          if text.count(anchor_branding) != 1 or text.count(anchor_locales) != 1:
               raise SystemExit("ERROR: expected exactly one insertion anchor in BUILD.gn")
-          missing = [
+          missing_locales = [
               entry
               for entry in locales
               if (path.parent / entry).is_file() and f'"{entry}"' not in text
           ]
-          if not missing:
-              print("====> No undeclared existing localized resources found; skipping patch.")
+          missing_branding = [
+              entry
+              for entry in branding
+              if (path.parent / entry).is_file() and f'"{entry}"' not in text
+          ]
+          if not missing_locales and not missing_branding:
+              print("====> No undeclared existing resources found; skipping patch.")
           else:
-              additions = "".join(f'    "{entry}",\n' for entry in missing)
-              path.write_text(text.replace(anchor, anchor + additions), encoding="utf-8")
-              print(f"====> Added {len(missing)} localized resource(s) to cobalt_shell_java_resources.")
+              if missing_branding:
+                  additions = "".join(f'    "{entry}",\n' for entry in missing_branding)
+                  text = text.replace(anchor_branding, additions + anchor_branding)
+              if missing_locales:
+                  additions = "".join(f'    "{entry}",\n' for entry in missing_locales)
+                  text = text.replace(anchor_locales, anchor_locales + additions)
+              path.write_text(text, encoding="utf-8")
+              print(f"====> Added {len(missing_locales) + len(missing_branding)} resource(s) to cobalt_shell_java_resources.")
           PY
           git diff -- cobalt/shell/android/BUILD.gn
 

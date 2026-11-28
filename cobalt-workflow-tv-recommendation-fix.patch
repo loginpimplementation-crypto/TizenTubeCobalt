@@ -1,8 +1,8 @@
 diff --git a/.github/workflows/android_27.lts.yaml b/.github/workflows/android_27.lts.yaml
-index cf99dce..e31dd59 100644
+index 61972e2f..3101c69a 100644
 --- a/.github/workflows/android_27.lts.yaml
 +++ b/.github/workflows/android_27.lts.yaml
-@@ -314,6 +314,198 @@ jobs:
+@@ -347,6 +347,198 @@ jobs:
            PY
            git diff -- "$DOC_FILE" || true
  
